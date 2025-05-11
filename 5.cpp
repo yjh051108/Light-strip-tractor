@@ -15,7 +15,7 @@ struct DetectionParams {
     int morph_open_size = 3;
     int dilate_iterations = 2;
     float min_aspect_ratio = 3.5f;   // 修改最小长宽比
-    float max_aspect_ratio = 15.0f;  // 保持最大长宽比
+    float max_aspect_ratio = 50.0f;  // 保持最大长宽比
 };
 
 class LightBarDetector {
@@ -312,8 +312,9 @@ public:
     }
 };
 
+
 int main() {
-    VideoCapture cap("1.mp4");
+    VideoCapture cap("vedio.mp4");
     if(!cap.isOpened()) {
         cout << "无法打开视频文件！" << endl;
         return -1;
