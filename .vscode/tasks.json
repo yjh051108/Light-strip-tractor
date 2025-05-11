@@ -1,0 +1,44 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "opencv4.1.0 compile task",
+            "type": "shell",
+            "command": "g++",
+            "args":[
+            "-g",
+            "-fexec-charset=GBK",
+            // "${fileBasename}",
+            "${workspaceRoot}\\${fileBasename}",
+            "-o",
+            "${workspaceRoot}\\${fileBasenameNoExtension}", 
+            // "${workspaceFolder}\\${fileBasenameNoExtension}.exe",
+            "-I",
+            "D:/Program/Opencv490/include",
+            "-L",
+            "D:/Program/Opencv490/bin",
+            "-l",
+            "libopencv_img_hash490",
+            "-l",
+            "libopencv_world490",
+            "-l",
+            "opencv_videoio_ffmpeg490_64"
+            
+            
+            ],
+            "options": {
+                "cwd": "D:/Program/MinGW/bin"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": { 
+                "panel": "new" //默认为“shared“表示共享，改成new之后每个进程创建新的端口
+            }
+        }
+    ]
+}
