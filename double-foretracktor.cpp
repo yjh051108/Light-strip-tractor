@@ -14,7 +14,7 @@ struct DetectionParams {
     double bilateral_sigma_space = 75;
     int morph_open_size = 3;
     int dilate_iterations = 2;
-    float min_aspect_ratio = 2.5f;   // 修改最小长宽比
+    float min_aspect_ratio = 3.0f;   // 修改最小长宽比
     float max_aspect_ratio = 100.0f;  // 保持最大长宽比
 };
 
@@ -171,62 +171,16 @@ public:
     }
 };
 
-class ArmorTracker {
-public:
-    int id;
-    ExtendedKalmanFilter ekf;
-    vector<Point2f> history_centers;
-    Point2f last_position;
-    int missing_frames;
-    bool active;
-    static int next_id;
-
-    ArmorTracker(const Point2f& init_pos) : 
-        id(next_id++),
-        missing_frames(0),
-        active(true) {
-        ekf.init(init_pos);
-        last_position = init_pos;
-        history_centers.push_back(init_pos);
-    }
-
-    void update(const Point2f& detection) {
-        ekf.update(detection);
-        last_position = detection;
-        history_centers.push_back(detection);
-        if(history_centers.size() > 5) {
-            history_centers.erase(history_centers.begin());
-        }
-        missing_frames = 0;
-        active = true;
-    }
-
-    void predict() {
-        ekf.predict();
-        missing_frames++;
-        if(missing_frames > 30) { // 如果连续30帧未检测到,则设为非活跃
-            active = false;
-        }
-    }
-
-    Point2f getPredictedPosition() {
-        return ekf.getPredictedPosition();
-    }
-
-    float getMatchingCost(const Point2f& detection) {
-        return norm(getPredictedPosition() - detection);
-    }
-};
-
-int ArmorTracker::next_id = 0;
-
 class LightBarDetector {
 private:
     DetectionParams params;
     Mat all_rect_debug;
-    vector<unique_ptr<ArmorTracker>> trackers;
-    const float max_match_distance = 50.0f; // 最大匹配距离
-    const int predict_frames = 3;
+怕【0-+
+891    vector<Point2f> history_centers;  // 只保留历史中心点
+    ExtendedKalmanFilter ekf;
+    bool tracking_active = false;
+    const int max_history = 5;  // 只保留5帧历史
+    const int predict_frames = 3;  // 预测未来3帧
 
     struct LightBar {
         RotatedRect rect;
@@ -439,56 +393,6 @@ private:
         return future_positions;
     }
 
-    void updateTrackers(const vector<Point2f>& detected_centers) {
-        // 预测所有跟踪器的位置
-        for(auto& tracker : trackers) {
-            tracker->predict();
-        }
-
-        // 构建代价矩阵
-        vector<vector<float>> cost_matrix(trackers.size(), vector<float>(detected_centers.size()));
-        for(size_t i = 0; i < trackers.size(); i++) {
-            for(size_t j = 0; j < detected_centers.size(); j++) {
-                cost_matrix[i][j] = trackers[i]->getMatchingCost(detected_centers[j]);
-            }
-        }
-
-        // 记录已匹配的检测结果
-        vector<bool> matched_detections(detected_centers.size(), false);
-
-        // 为每个跟踪器找到最近的检测结果
-        for(size_t i = 0; i < trackers.size(); i++) {
-            float min_cost = max_match_distance;
-            int best_match = -1;
-
-            for(size_t j = 0; j < detected_centers.size(); j++) {
-                if(!matched_detections[j] && cost_matrix[i][j] < min_cost) {
-                    min_cost = cost_matrix[i][j];
-                    best_match = j;
-                }
-            }
-
-            if(best_match != -1) {
-                trackers[i]->update(detected_centers[best_match]);
-                matched_detections[best_match] = true;
-            }
-        }
-
-        // 为未匹配的检测结果创建新的跟踪器
-        for(size_t i = 0; i < detected_centers.size(); i++) {
-            if(!matched_detections[i]) {
-                trackers.push_back(make_unique<ArmorTracker>(detected_centers[i]));
-            }
-        }
-
-        // 移除非活跃的跟踪器
-        trackers.erase(
-            remove_if(trackers.begin(), trackers.end(),
-                [](const unique_ptr<ArmorTracker>& t) { return !t->active; }),
-            trackers.end()
-        );
-    }
-
 public:
     Mat debug_img;
     vector<ArmorPair> matchLightBars(const vector<LightBar>& lights) {
@@ -519,44 +423,61 @@ public:
         debug_img = frame.clone();
         auto pairs = matchLightBars(lights);
         
-        // 提取所有装甲板中心点
-        vector<Point2f> detected_centers;
-        for(const auto& pair : pairs) {
-            Point2f center = (pair.left.rect.center + pair.right.rect.center) * 0.5f;
-            detected_centers.push_back(center);
+        if(pairs.empty()) {
+            tracking_active = false;
+            history_centers.clear();
+            imshow("Debug Window", debug_img);
+            return;
         }
 
-        // 更新所有跟踪器
-        updateTrackers(detected_centers);
+        const auto& p = pairs[0];
+        Point2f center = (p.left.rect.center + p.right.rect.center) * 0.5f;
+        circle(debug_img, center, 3, Scalar(0,0,255), -1);  // 当前点
 
-        // 绘制每个跟踪器的信息
-        for(const auto& tracker : trackers) {
-            // 绘制历史轨迹
-            for(size_t i = 1; i < tracker->history_centers.size(); i++) {
-                line(debug_img, tracker->history_centers[i-1], tracker->history_centers[i],
-                     Scalar(255,0,0), 2);
-            }
+        if(!tracking_active) {
+            ekf.init(center);
+            tracking_active = true;
+            history_centers.clear();
+        }
 
-            // 绘制预测轨迹
-            Point2f current = tracker->getPredictedPosition();
-            Point2f velocity = tracker->ekf.getTangentialVelocity() + 
-                             tracker->ekf.getNormalVelocity();
+        history_centers.push_back(center);
+        if(history_centers.size() > 3) {  // 只保留最近3帧
+            history_centers.erase(history_centers.begin());
+        }
 
-            vector<Point2f> future_positions = predictFuturePositions(current, velocity);
+        // 绘制历史轨迹（最近3帧）
+        for(size_t i = 1; i < history_centers.size(); i++) {
+            line(debug_img, history_centers[i-1], history_centers[i], 
+                 Scalar(255,0,0), 2);  // 蓝色历史轨迹
+        }
+
+        // 预测未来3帧
+        if(tracking_active && history_centers.size() >= 2) {
+            Point2f velocity = (center - history_centers[history_centers.size()-2]);
+            vector<Point2f> future_positions = predictFuturePositions(center, velocity);
             
-            Point2f last_pos = current;
+            // 绘制预测轨迹
+            Point2f last_pos = center;
             for(size_t i = 0; i < future_positions.size(); i++) {
+                // 使用渐变色显示未来轨迹
                 int alpha = 255 * (predict_frames - i) / predict_frames;
                 Scalar color(0, alpha, 0);
+                
+                // 绘制预测点
                 circle(debug_img, future_positions[i], 4, color, -1);
+                
+                // 绘制预测轨迹线
                 line(debug_img, last_pos, future_positions[i], color, 1, LINE_AA);
                 last_pos = future_positions[i];
             }
 
-            // 绘制ID和其他信息
-            putText(debug_img, "ID: " + to_string(tracker->id),
-                   current + Point2f(10, 10), FONT_HERSHEY_SIMPLEX, 
-                   0.6, Scalar(0,255,0), 2);
+            // 特别标记下一帧位置
+            circle(debug_img, future_positions[0], 5, Scalar(0,255,0), -1);
+            
+            // 显示预测信息
+            putText(debug_img, 
+                    format("Next frame: (%.1f, %.1f)", future_positions[0].x, future_positions[0].y),
+                    Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.6, Scalar(0,255,0), 2);
         }
 
         imshow("Debug Window", debug_img);
@@ -631,7 +552,7 @@ public:
 };
 
 int main() {
-    VideoCapture cap("2.mp4");
+    VideoCapture cap("lights.mp4");
     if(!cap.isOpened()) {
         cout << "无法打开视频文件！" << endl;
         return -1;
