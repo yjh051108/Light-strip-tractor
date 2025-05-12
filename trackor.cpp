@@ -126,49 +126,51 @@ private:
         display = Scalar(0,0,0);
         
         // 原始图像
-        Mat roi = display(Rect(0, 0, width, height));
-        resize(frame, roi, roi.size());
-        putText(roi, "Original", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
+        Mat display_original;
+        if(!frame.empty()) {
+            resize(frame, display_original, Size(width, height));
+            putText(display_original, "Original", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
+        }
         
         // 灰度图
         Mat gray_color;
         cvtColor(gray, gray_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width, 0, width, height));
-        resize(gray_color, roi, roi.size());
-        putText(roi, "Grayscale", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
+        Mat display_gray;
+        resize(gray_color, display_gray, Size(width, height));
+        putText(display_gray, "Grayscale", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
         
         // 二值化结果
         Mat bin_color;
         cvtColor(binary, bin_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width*2, 0, width, height));
-        resize(bin_color, roi, roi.size());
-        putText(roi, "Binary", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
+        Mat display_binary;
+        resize(bin_color, display_binary, Size(width, height));
+        putText(display_binary, "Binary", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
         
         // 亮度筛选结果
         Mat bright_mask = getBrightnessFilteredImage(gray);
         Mat bright_color;
         cvtColor(bright_mask, bright_color, COLOR_GRAY2BGR);
-        roi = display(Rect(0, height, width, height));
-        resize(bright_color, roi, roi.size());
-        putText(roi, "Brightness Filter", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
+        Mat display_bright;
+        resize(bright_color, display_bright, Size(width, height));
+        putText(display_bright, "Brightness Filter", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
         
         // 面积筛选结果
         Mat area_mask = getAreaFilteredImage(binary);
         Mat area_color;
         cvtColor(area_mask, area_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width, height, width, height));
-        resize(area_color, roi, roi.size());
-        putText(roi, "Area Filter", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
-        putText(roi, "Min Area: " + to_string(params.min_contour_area), 
+        Mat display_area;
+        resize(area_color, display_area, Size(width, height));
+        putText(display_area, "Area Filter", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
+        putText(display_area, "Min Area: " + to_string(params.min_contour_area), 
                 Point(10, 60), FONT_HERSHEY_SIMPLEX, 0.6, Scalar(0,255,0), 2);
         
         // 最终结果（面积+亮度筛选）
         Mat final_mask = area_mask & bright_mask;
         Mat final_color;
         cvtColor(final_mask, final_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width*2, height, width, height));
-        resize(final_color, roi, roi.size());
-        putText(roi, "Final Result", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
+        Mat display_final;
+        resize(final_color, display_final, Size(width, height));
+        putText(display_final, "Final Result", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
         
         imshow("Preprocessing Steps", display);
     }
@@ -282,7 +284,14 @@ public:
                     for(int i = 0; i < 4; i++) {
                         line(all_rect_debug, vertices[i], vertices[(i+1)%4], Scalar(0,255,0), 2);
                     }
-                    lights.emplace_back(r, mean(gray(r.boundingRect() & Rect(0,0,frame.cols,frame.rows)))[0], mean(frame(r.boundingRect())));
+                    Rect bbox = r.boundingRect();
+        if(bbox.x >= 0 && bbox.y >= 0 && 
+           bbox.x + bbox.width <= frame.cols && 
+           bbox.y + bbox.height <= frame.rows) {
+            lights.emplace_back(r, mean(gray(bbox))[0], mean(frame(bbox)));
+        } else {
+            cerr << "无效的边界框: " << bbox << endl;
+        }
                     cout << "找到一个灯带!" << endl;
                 }
             } catch(...) {

@@ -14,7 +14,7 @@ struct DetectionParams {
     double bilateral_sigma_space = 75;
     int morph_open_size = 3;
     int dilate_iterations = 2;
-    float min_aspect_ratio = 3.0f;   // 修改最小长宽比
+    float min_aspect_ratio = 4.0f;   // 修改最小长宽比
     float max_aspect_ratio = 100.0f;  // 保持最大长宽比
 };
 
@@ -25,6 +25,7 @@ private:
     Mat Q;             // 过程噪声协方差
     Mat R;             // 测量噪声协方差
     double dt;         // 时间步长
+    double last_timestamp;  // 记录上一帧时间戳（秒）
     Point2f last_tangential;  // 上一次的切向量
     Point2f last_normal;     // 上一次的法向量
 
@@ -56,6 +57,7 @@ public:
         Q.at<double>(5,5) *= 1.0;  // 法向加速度
         R = Mat::eye(2, 2, CV_64F) * 1.0;
         dt = 1.0/30.0;
+        last_timestamp = -1;  // 初始化为无效值
         last_tangential = Point2f(1, 0);
         last_normal = Point2f(0, 1);
     }
@@ -138,7 +140,14 @@ public:
         P = F * P * F.t() + Q;
     }
 
-    void update(const Point2f& measurement) {
+    void update(const Point2f& measurement, double current_timestamp) {
+        // 根据时间戳更新时间步长
+        if(last_timestamp < 0) {
+            dt = 1.0/30.0;  // 首帧使用默认值
+        } else {
+            dt = current_timestamp - last_timestamp;
+        }
+        last_timestamp = current_timestamp;  // 保存当前时间戳作为下一帧的上一帧时间戳
         Mat z = (Mat_<double>(2,1) << measurement.x, measurement.y);
         Mat H = (Mat_<double>(2,8) << 1,0,0,0,0,0,0,0, 0,1,0,0,0,0,0,0);  // 测量矩阵
         
@@ -147,6 +156,8 @@ public:
         Mat K = P * H.t() * S.inv();
         
         state = state + K * y;
+        // 确保时间步长非负
+        if(dt < 0) dt = 1.0/30.0;
         P = (Mat::eye(8,8,CV_64F) - K * H) * P;
     }
 
@@ -217,7 +228,7 @@ private:
         };
         
         float ratio1 = getRatio(p1.left, p1.right), ratio2 = getRatio(p2.left, p2.right);
-        if(ratio1 < 1.5f || ratio1 > 6.0f || ratio2 < 1.5f || ratio2 > 6.0f) {
+        if(ratio1 < 1.5f || ratio1 > 3.5f || ratio2 < 1.5f || ratio2 > 3.5f) {
             cout << "装甲板宽高比不合适: ratio1=" << ratio1 << ", ratio2=" << ratio2 
                  << " (应在1.5~5.0之间)" << endl;
             return false;
@@ -238,7 +249,7 @@ private:
 
         // 只检查两个灯条是否近似平行(允许15度误差)
         float parallel_diff = abs(angle_left - angle_right);
-        if(parallel_diff > CV_PI/12) { // 15度
+        if(parallel_diff > CV_PI/18) { // 15度
             cout << "左右灯条不平行, 角度差: " << parallel_diff * 180/CV_PI << "° (应小于15°)" << endl;
             cout << "左灯条角度: " << angle_left * 180/CV_PI << "°" << endl;
             cout << "右灯条角度: " << angle_right * 180/CV_PI << "°" << endl;
@@ -328,60 +339,7 @@ private:
         return areaMask;
     }
 
-    void showPreprocessing(const Mat& frame, const Mat& gray, const Mat& binary) {
-        // 创建一个3x2的网格显示
-        int width = frame.cols/3;
-        int height = frame.rows/2;
-        Mat display(height*2, width*3, CV_8UC3);
-        display = Scalar(0,0,0);
-        
-        // 原始图像
-        Mat roi = display(Rect(0, 0, width, height));
-        resize(frame, roi, roi.size());
-        putText(roi, "Original", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
-        
-        // 灰度图
-        Mat gray_color;
-        cvtColor(gray, gray_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width, 0, width, height));
-        resize(gray_color, roi, roi.size());
-        putText(roi, "Grayscale", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
-        
-        // 二值化结果
-        Mat bin_color;
-        cvtColor(binary, bin_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width*2, 0, width, height));
-        resize(bin_color, roi, roi.size());
-        putText(roi, "Binary", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
-        
-        // 亮度筛选结果
-        Mat bright_mask = getBrightnessFilteredImage(gray);
-        Mat bright_color;
-        cvtColor(bright_mask, bright_color, COLOR_GRAY2BGR);
-        roi = display(Rect(0, height, width, height));
-        resize(bright_color, roi, roi.size());
-        putText(roi, "Brightness Filter", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
-        
-        // 面积筛选结果
-        Mat area_mask = getAreaFilteredImage(binary);
-        Mat area_color;
-        cvtColor(area_mask, area_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width, height, width, height));
-        resize(area_color, roi, roi.size());
-        putText(roi, "Area Filter", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
-        putText(roi, "Min Area: " + to_string(params.min_contour_area), 
-                Point(10, 60), FONT_HERSHEY_SIMPLEX, 0.6, Scalar(0,255,0), 2);
-        
-        // 最终结果（面积+亮度筛选）
-        Mat final_mask = area_mask & bright_mask;
-        Mat final_color;
-        cvtColor(final_mask, final_color, COLOR_GRAY2BGR);
-        roi = display(Rect(width*2, height, width, height));
-        resize(final_color, roi, roi.size());
-        putText(roi, "Final Result", Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(0,255,0), 2);
-        
-        imshow("Preprocessing Steps", display);
-    }
+    
 
     // 预测未来几帧的位置
     vector<Point2f> predictFuturePositions(const Point2f& current_pos, const Point2f& velocity) {
@@ -506,7 +464,7 @@ public:
         dilate(bin, bin, element);
         
         // 显示预处理过程
-        showPreprocessing(frame, gray, bin);
+        
         
         // 使用预处理结果查找轮廓
         vector<vector<Point>> contours;
@@ -535,7 +493,14 @@ public:
                     for(int i = 0; i < 4; i++) {
                         line(all_rect_debug, vertices[i], vertices[(i+1)%4], Scalar(0,255,0), 2);
                     }
-                    lights.emplace_back(r, mean(gray(r.boundingRect() & Rect(0,0,frame.cols,frame.rows)))[0], mean(frame(r.boundingRect())));
+                    Rect bbox = r.boundingRect();
+        if(bbox.x >= 0 && bbox.y >= 0 && 
+           bbox.x + bbox.width <= frame.cols && 
+           bbox.y + bbox.height <= frame.rows) {
+            lights.emplace_back(r, mean(gray(bbox))[0], mean(frame(bbox)));
+        } else {
+            cerr << "无效的边界框: " << bbox << endl;
+        }
                     cout << "找到一个灯带!" << endl;
                 }
             } catch(...) {
@@ -551,7 +516,7 @@ public:
 };
 
 int main() {
-    VideoCapture cap("2.mp4");
+    VideoCapture cap("vedio.mp4");
     if(!cap.isOpened()) {
         cout << "无法打开视频文件！" << endl;
         return -1;
