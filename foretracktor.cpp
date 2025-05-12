@@ -14,7 +14,7 @@ struct DetectionParams {
     double bilateral_sigma_space = 75;
     int morph_open_size = 3;
     int dilate_iterations = 2;
-    float min_aspect_ratio = 3.0f;   // 修改最小长宽比
+    float min_aspect_ratio = 2.0f;   // 修改最小长宽比
     float max_aspect_ratio = 100.0f;  // 保持最大长宽比
 };
 
@@ -217,7 +217,7 @@ private:
         };
         
         float ratio1 = getRatio(p1.left, p1.right), ratio2 = getRatio(p2.left, p2.right);
-        if(ratio1 < 1.5f || ratio1 > 6.0f || ratio2 < 1.5f || ratio2 > 6.0f) {
+        if(ratio1 < 1.5f || ratio1 > 3.5f || ratio2 < 1.5f || ratio2 > 3.5f) {
             cout << "装甲板宽高比不合适: ratio1=" << ratio1 << ", ratio2=" << ratio2 
                  << " (应在1.5~5.0之间)" << endl;
             return false;
@@ -238,7 +238,7 @@ private:
 
         // 只检查两个灯条是否近似平行(允许15度误差)
         float parallel_diff = abs(angle_left - angle_right);
-        if(parallel_diff > CV_PI/12) { // 15度
+        if(parallel_diff > CV_PI/36) { // 15度
             cout << "左右灯条不平行, 角度差: " << parallel_diff * 180/CV_PI << "° (应小于15°)" << endl;
             cout << "左灯条角度: " << angle_left * 180/CV_PI << "°" << endl;
             cout << "右灯条角度: " << angle_right * 180/CV_PI << "°" << endl;
@@ -551,7 +551,7 @@ public:
 };
 
 int main() {
-    VideoCapture cap("lights.mp4");
+    VideoCapture cap("vedio.mp4");
     if(!cap.isOpened()) {
         cout << "无法打开视频文件！" << endl;
         return -1;
