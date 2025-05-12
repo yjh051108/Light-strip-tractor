@@ -175,8 +175,7 @@ class LightBarDetector {
 private:
     DetectionParams params;
     Mat all_rect_debug;
-怕【0-+
-891    vector<Point2f> history_centers;  // 只保留历史中心点
+    vector<Point2f> history_centers;  // 只保留历史中心点
     ExtendedKalmanFilter ekf;
     bool tracking_active = false;
     const int max_history = 5;  // 只保留5帧历史
@@ -552,7 +551,7 @@ public:
 };
 
 int main() {
-    VideoCapture cap("lights.mp4");
+    VideoCapture cap("2.mp4");
     if(!cap.isOpened()) {
         cout << "无法打开视频文件！" << endl;
         return -1;

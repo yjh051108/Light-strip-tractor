@@ -14,7 +14,7 @@ struct DetectionParams {
     double bilateral_sigma_space = 75;
     int morph_open_size = 3;
     int dilate_iterations = 2;
-    float min_aspect_ratio = 2.0f;   // 修改最小长宽比
+    float min_aspect_ratio = 4.0f;   // 修改最小长宽比
     float max_aspect_ratio = 100.0f;  // 保持最大长宽比
 };
 
@@ -238,7 +238,7 @@ private:
 
         // 只检查两个灯条是否近似平行(允许15度误差)
         float parallel_diff = abs(angle_left - angle_right);
-        if(parallel_diff > CV_PI/36) { // 15度
+        if(parallel_diff > CV_PI/18) { // 15度
             cout << "左右灯条不平行, 角度差: " << parallel_diff * 180/CV_PI << "° (应小于15°)" << endl;
             cout << "左灯条角度: " << angle_left * 180/CV_PI << "°" << endl;
             cout << "右灯条角度: " << angle_right * 180/CV_PI << "°" << endl;
