@@ -1,20 +1,21 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
+#include "MotionEstimator.h"
 using namespace cv;
 using namespace std;
 
 struct DetectionParams {
     int gaussian_size = 3;
     int threshold_value = 100;
-    int min_contour_area = 50;
-    int brightness_threshold = 200;  // 从100增加到200
+    int min_contour_area = 15;
+    int brightness_threshold = 100;  // 从100增加到200
     int bilateral_d = 7;
     double bilateral_sigma_color = 75;
     double bilateral_sigma_space = 75;
     int morph_open_size = 3;
     int dilate_iterations = 2;
-    float min_aspect_ratio = 4.0f;   // 修改最小长宽比
+    float min_aspect_ratio = 1.5f;   // 修改最小长宽比
     float max_aspect_ratio = 100.0f;  // 保持最大长宽比
 };
 
@@ -25,7 +26,7 @@ private:
     Mat Q;             // 过程噪声协方差
     Mat R;             // 测量噪声协方差
     double dt;         // 时间步长
-    double last_timestamp;  // 记录上一帧时间戳（秒）
+    int last_frame_id;      // 记录上一帧ID
     Point2f last_tangential;  // 上一次的切向量
     Point2f last_normal;     // 上一次的法向量
 
@@ -55,9 +56,11 @@ public:
         Q.at<double>(3,3) *= 0.5;  // 法向速度
         Q.at<double>(4,4) *= 0.2;  // 切向加速度
         Q.at<double>(5,5) *= 1.0;  // 法向加速度
+        Q.at<double>(6,6) *= 0.05; // 切向加加速度
+        Q.at<double>(7,7) *= 0.1;  // 法向加加速度
         R = Mat::eye(2, 2, CV_64F) * 1.0;
         dt = 1.0/30.0;
-        last_timestamp = -1;  // 初始化为无效值
+        last_frame_id = -1;  // 初始化为无效值
         last_tangential = Point2f(1, 0);
         last_normal = Point2f(0, 1);
     }
@@ -76,6 +79,8 @@ public:
         state.at<double>(3) = vn;           // 法向速度
         state.at<double>(4) = 0;            // 切向加速度
         state.at<double>(5) = 0;            // 法向加速度
+        state.at<double>(6) = 0;            // 切向加加速度
+        state.at<double>(7) = 0;            // 法向加加速度
         state.at<double>(6) = 0;            // 切向加加速度
         state.at<double>(7) = 0;            // 法向加加速度
     }
@@ -140,14 +145,14 @@ public:
         P = F * P * F.t() + Q;
     }
 
-    void update(const Point2f& measurement, double current_timestamp) {
-        // 根据时间戳更新时间步长
-        if(last_timestamp < 0) {
+    void update(const Point2f& measurement, int current_frame_id) {
+        // 根据帧ID更新时间步长
+        if(last_frame_id < 0) {
             dt = 1.0/30.0;  // 首帧使用默认值
         } else {
-            dt = current_timestamp - last_timestamp;
+            dt = (current_frame_id - last_frame_id) * (1.0/30.0);
         }
-        last_timestamp = current_timestamp;  // 保存当前时间戳作为下一帧的上一帧时间戳
+        last_frame_id = current_frame_id;  // 保存当前帧ID作为下一帧的上一帧ID
         Mat z = (Mat_<double>(2,1) << measurement.x, measurement.y);
         Mat H = (Mat_<double>(2,8) << 1,0,0,0,0,0,0,0, 0,1,0,0,0,0,0,0);  // 测量矩阵
         
@@ -187,10 +192,7 @@ private:
     DetectionParams params;
     Mat all_rect_debug;
     vector<Point2f> history_centers;  // 只保留历史中心点
-    ExtendedKalmanFilter ekf;
     bool tracking_active = false;
-    const int max_history = 5;  // 只保留5帧历史
-    const int predict_frames = 3;  // 预测未来3帧
 
     struct LightBar {
         RotatedRect rect;
@@ -341,14 +343,7 @@ private:
 
     
 
-    // 预测未来几帧的位置
-    vector<Point2f> predictFuturePositions(const Point2f& current_pos, const Point2f& velocity) {
-        vector<Point2f> future_positions;
-        for(int i = 1; i <= predict_frames; i++) {
-            future_positions.push_back(current_pos + velocity * i);
-        }
-        return future_positions;
-    }
+
 
 public:
     Mat debug_img;
@@ -381,60 +376,38 @@ public:
         auto pairs = matchLightBars(lights);
         
         if(pairs.empty()) {
-            tracking_active = false;
-            history_centers.clear();
             imshow("Debug Window", debug_img);
             return;
         }
 
-        const auto& p = pairs[0];
-        Point2f center = (p.left.rect.center + p.right.rect.center) * 0.5f;
-        circle(debug_img, center, 3, Scalar(0,0,255), -1);  // 当前点
-
-        if(!tracking_active) {
-            ekf.init(center);
-            tracking_active = true;
-            history_centers.clear();
+        // 获取所有装甲板中心点
+        vector<Point2f> centers;
+        for(const auto& p : pairs) {
+            centers.push_back((p.left.rect.center + p.right.rect.center) * 0.5f);
         }
-
-        history_centers.push_back(center);
-        if(history_centers.size() > 3) {  // 只保留最近3帧
-            history_centers.erase(history_centers.begin());
-        }
-
-        // 绘制历史轨迹（最近3帧）
-        for(size_t i = 1; i < history_centers.size(); i++) {
-            line(debug_img, history_centers[i-1], history_centers[i], 
-                 Scalar(255,0,0), 2);  // 蓝色历史轨迹
-        }
-
-        // 预测未来3帧
-        if(tracking_active && history_centers.size() >= 2) {
-            Point2f velocity = (center - history_centers[history_centers.size()-2]);
-            vector<Point2f> future_positions = predictFuturePositions(center, velocity);
+        
+        // 使用MotionEstimator处理点
+        MotionEstimator estimator;
+        estimator.processFrame(frame);
+        Mat classified_points = estimator.getClassifiedPoints();
+        
+        // 绘制当前检测到的点(红色)
+        for(const auto& center : centers) {
+            circle(debug_img, center, 3, Scalar(0,0,255), -1);
             
-            // 绘制预测轨迹
-            Point2f last_pos = center;
-            for(size_t i = 0; i < future_positions.size(); i++) {
-                // 使用渐变色显示未来轨迹
-                int alpha = 255 * (predict_frames - i) / predict_frames;
-                Scalar color(0, alpha, 0);
-                
-                // 绘制预测点
-                circle(debug_img, future_positions[i], 4, color, -1);
-                
-                // 绘制预测轨迹线
-                line(debug_img, last_pos, future_positions[i], color, 1, LINE_AA);
-                last_pos = future_positions[i];
-            }
-
-            // 特别标记下一帧位置
-            circle(debug_img, future_positions[0], 5, Scalar(0,255,0), -1);
-            
-            // 显示预测信息
-            putText(debug_img, 
-                    format("Next frame: (%.1f, %.1f)", future_positions[0].x, future_positions[0].y),
-                    Point(10, 30), FONT_HERSHEY_SIMPLEX, 0.6, Scalar(0,255,0), 2);
+            // 在中心点上方显示预测结果
+        Point2f pred_point(classified_points.at<float>(0,0), 
+                          classified_points.at<float>(0,1));
+        putText(debug_img, "Pred: (" + to_string((int)pred_point.x) + "," + to_string((int)pred_point.y) + ")", 
+                Point(center.x + 10, center.y - 10), 
+                FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255,0,0), 2);
+        }
+        
+        // 绘制预测点(黄色)
+        for (int i = 0; i < classified_points.rows; i++) {
+            Point2f pred_point(classified_points.at<float>(i,0), 
+                              classified_points.at<float>(i,1));
+            circle(debug_img, pred_point, 4, Scalar(0,255,255), -1);
         }
 
         imshow("Debug Window", debug_img);
@@ -516,7 +489,7 @@ public:
 };
 
 int main() {
-    VideoCapture cap("vedio.mp4");
+    VideoCapture cap("2.mp4");
     if(!cap.isOpened()) {
         cout << "无法打开视频文件！" << endl;
         return -1;

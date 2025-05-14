@@ -1,6 +1,7 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
+#include "ArmorDetector.h"
 using namespace cv;
 using namespace std;
 
@@ -20,8 +21,9 @@ struct DetectionParams {
 
 class LightBarDetector {
 private:
-    DetectionParams params;
+    ArmorDetector armor_detector;
     Mat all_rect_debug;  // 添加用于显示所有矩形的调试图像
+    DetectionParams params;
     struct LightBar {
         RotatedRect rect;
         Point2f top_point, bottom_point;
@@ -177,6 +179,10 @@ private:
 
 public:
     Mat debug_img;
+    
+    Point2f getArmorCenter(const ArmorPair& pair) {
+        return (pair.left.rect.center + pair.right.rect.center) * 0.5f;
+    }
     vector<ArmorPair> matchLightBars(const vector<LightBar>& lights) {
         vector<ArmorPair> pairs;
         vector<bool> used(lights.size());
@@ -224,7 +230,7 @@ public:
             }
             
             // 中心点
-            Point2f center = (p.left.rect.center + p.right.rect.center) * 0.5f;
+            Point2f center = getArmorCenter(p);
             circle(debug_img, center, 3, Scalar(0,0,255), -1);
         }
         
@@ -232,76 +238,16 @@ public:
     }
 
     vector<LightBar> detect(Mat& frame) {
-        auto lights = vector<LightBar>();
-        all_rect_debug = frame.clone();  // 初始化调试图像
-        debug_img = frame.clone();  // 移动到函数开始处，用于绘制所有矩形
-        Mat gray;
-        cvtColor(frame, gray, COLOR_BGR2GRAY);
+        auto centers = armor_detector.detectArmorCenters(frame);
+        vector<LightBar> lights;
         
-        // 1. 亮度筛选
-        Mat brightMask = getBrightnessFilteredImage(gray);
-        
-        // 2. 二值化 
-        Mat bin;
-        threshold(gray, bin, params.threshold_value, 255, THRESH_BINARY);
-        bin = bin & brightMask;  // 应用亮度mask
-        
-        // 3. 面积筛选
-        Mat areaMask = getAreaFilteredImage(bin);
-        bin = bin & areaMask;
-        
-        // 4. 膨胀操作，连接可能断开的灯条
-        Mat element = getStructuringElement(MORPH_RECT, Size(3,3));
-        dilate(bin, bin, element);
-        
-        // 显示预处理过程
-        showPreprocessing(frame, gray, bin);
-        
-        // 使用预处理结果查找轮廓
-        vector<vector<Point>> contours;
-        findContours(bin, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
-        
-        //cout << "找到 " << contours.size() << " 个轮廓" << endl;
-        
-        for(const auto& c : contours) {
-            try {
-                RotatedRect r = minAreaRect(c);
-                Point2f vertices[4];
-                r.points(vertices);
-
-                // 计算最小外接矩形的长宽比
-                float long_side = max(r.size.width, r.size.height);
-                float short_side = min(r.size.width, r.size.height);
-                float aspect_ratio = long_side / short_side;
-                
-                //cout << "轮廓的最小外接矩形 - 长边: " << long_side 
-                //     << " 短边: " << short_side
-                //     << " 长宽比: " << aspect_ratio << endl;
-                
-                // 只要长宽比符合要求,就认为是灯带
-                if(aspect_ratio >= params.min_aspect_ratio && aspect_ratio <= params.max_aspect_ratio) {
-                    // 绘制找到的灯带
-                    for(int i = 0; i < 4; i++) {
-                        line(all_rect_debug, vertices[i], vertices[(i+1)%4], Scalar(0,255,0), 2);
-                    }
-                    Rect bbox = r.boundingRect();
-        if(bbox.x >= 0 && bbox.y >= 0 && 
-           bbox.x + bbox.width <= frame.cols && 
-           bbox.y + bbox.height <= frame.rows) {
-            lights.emplace_back(r, mean(gray(bbox))[0], mean(frame(bbox)));
-        } else {
-            cerr << "无效的边界框: " << bbox << endl;
-        }
-                    cout << "找到一个灯带!" << endl;
-                }
-            } catch(...) {
-                cout << "处理轮廓时出现异常" << endl;
-            }
+        // 将中心点转换为LightBar对象
+        for(const auto& center : centers) {
+            Point2f top(center.x, center.y - 10);
+            Point2f bottom(center.x, center.y + 10);
+            lights.emplace_back(top, bottom);
         }
         
-        cout << "最终找到 " << lights.size() << " 个灯条" << endl;
-        showDebugInfo(frame, lights);
-        imshow("All Rectangles", all_rect_debug);  // 显示所有矩形的调试窗口
         return lights;
     }
 };
