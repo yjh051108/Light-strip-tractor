@@ -57,7 +57,7 @@ private:
             return ratio;
         };
         
-        // 去掉这里的长宽比判断，因为在轮廓检测时已经判断过了
+     
         float ratio1 = getRatio(p1.left, p1.right), ratio2 = getRatio(p2.left, p2.right);
         if(ratio1 < 1.0f || ratio1 > 3.5f || ratio2 < 1.0f || ratio2 > 3.5f) {
             //cout << "装甲板宽高比不合适: " << ratio1 << ", " << ratio2 << endl;
@@ -254,8 +254,7 @@ public:
         Mat element = getStructuringElement(MORPH_RECT, Size(3,3));
         dilate(bin, bin, element);
         
-        // 显示预处理过程
-        showPreprocessing(frame, gray, bin);
+   
         
         // 使用预处理结果查找轮廓
         vector<vector<Point>> contours;
@@ -274,9 +273,7 @@ public:
                 float short_side = min(r.size.width, r.size.height);
                 float aspect_ratio = long_side / short_side;
                 
-                //cout << "轮廓的最小外接矩形 - 长边: " << long_side 
-                //     << " 短边: " << short_side
-                //     << " 长宽比: " << aspect_ratio << endl;
+     
                 
                 // 只要长宽比符合要求,就认为是灯带
                 if(aspect_ratio >= params.min_aspect_ratio && aspect_ratio <= params.max_aspect_ratio) {
@@ -301,7 +298,7 @@ public:
         
         cout << "最终找到 " << lights.size() << " 个灯条" << endl;
         showDebugInfo(frame, lights);
-        imshow("All Rectangles", all_rect_debug);  // 显示所有矩形的调试窗口
+        imshow("All Rectangles", all_rect_debug);  
         return lights;
     }
 };
@@ -316,9 +313,9 @@ int main() {
     LightBarDetector detector;
     Mat frame;
     
-    namedWindow("Debug Window", WINDOW_AUTOSIZE);  // 只保留debug窗口
-    namedWindow("Preprocessing Steps", WINDOW_AUTOSIZE);  // 添加预处理窗口
-    namedWindow("All Rectangles", WINDOW_AUTOSIZE);  // 添加新的窗口
+    namedWindow("Debug Window", WINDOW_AUTOSIZE);  
+ 
+    namedWindow("All Rectangles", WINDOW_AUTOSIZE);  
     
     while(true) {
         if(!cap.read(frame)) {
@@ -328,7 +325,7 @@ int main() {
 
         detector.detect(frame);
         
-        char key = waitKey(10);  // 降低延迟，提高显示帧率
+        char key = waitKey(10);  
         if(key == 27) break;
         else if(key == 's') {
             imwrite("light_bars.jpg", detector.debug_img);
