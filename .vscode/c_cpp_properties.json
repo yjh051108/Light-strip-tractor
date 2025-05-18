@@ -6,7 +6,8 @@
                 "${workspaceFolder}/**",
                 "D:/Program/Opencv490/include",
                 "D:/Program/Opencv490/lib",
-                "D:/Program/Opencv490/include/opencv2"       
+                "D:/Program/Opencv490/include/opencv2",
+                "${workspaceFolder}/eigen"       
             ],
             "defines": [],
             "compilerPath": "D:/Program/MinGW/bin/g++.exe",
